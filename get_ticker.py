@@ -1,6 +1,7 @@
 import yfinance as yf
 import re
 from datetime import datetime
+import re
 
 
 class ticker_data:
@@ -10,7 +11,7 @@ class ticker_data:
         self.growth_needed = 0.06 
 
     # function to retrieve ticker from a body of text
-    def get_ticker(self, body):
+    def get_ticker(self, body, seen_map, not_stock_set):
         # frequent words that look like tickers but aren't
         blacklist_words = [
             "YOLO",
@@ -135,14 +136,19 @@ class ticker_data:
 
             if word and word not in blacklist_words:
                 try:
+                    if word in not_stock_set:
+                        pass
+
+                    elif word in seen_map:
+                        return word, seen_map[word]
+                    
                     # special case for $ROPE
-                    if word != "ROPE":
-                        # sends request to IEX API to determine whether the current word is a valid ticker
-                        # if it isn't, it'll return an error and therefore continue on to the next word
-                        if self.get_current_price(word) == None:
-                            pass
-                        else:
-                            return word
+                    curr_price = self.get_current_price(word)
+                    if curr_price == None:
+                        not_stock_set.add(word)
+                        pass
+                    else:
+                        return word, curr_price
                 except Exception as e:
                     pass
 
@@ -158,16 +164,23 @@ class ticker_data:
                 and word.isalpha()
             ):
                 try:
+                    if word in not_stock_set:
+                        continue
+
+                    elif word in seen_map:
+                        return word, seen_map[word]
                     # special case for $ROPE
-                    if self.get_current_price(word) == None:
+                    curr_price = self.get_current_price(word)
+                    if curr_price == None:
+                        not_stock_set.add(word)
                         pass
                     else:
-                        return word
+                        return word, curr_price
                 except Exception as e:
                     continue
 
         # if no ticker was found
-        return "None"
+        return None, None
 
     def check_after_dollarsign(self, body, start_index):
         """
@@ -207,11 +220,17 @@ class ticker_data:
 
     def get_historic_price(self, stock_symbol, start_date):
         # 86,400 seconds in a day
-        end_date = start_date + 86_400
+        sec_in_day = 86_400
+        end_date = start_date + sec_in_day
         ticker = yf.Ticker(stock_symbol)
 
         try:
-            # Get historical data for the specified date
+            while datetime.fromtimestamp(end_date).weekday() >= 5:
+                end_date += sec_in_day
+
+            while datetime.fromtimestamp(start_date).weekday() >= 5:
+                start_date -= sec_in_day 
+
             start_date = datetime.fromtimestamp(start_date).strftime(
                 "%Y-%m-%d"
             )
@@ -239,3 +258,31 @@ class ticker_data:
             return 1, adjusted_diff
         else:
             return 0, adjusted_diff
+    
+    def remove_urls(self, text):
+        # Regular expression to match URLs
+        url_pattern = r"http?://\S+|www\.\S+"
+        # Replace URLs with an empty string
+        return re.sub(url_pattern, "", text)
+
+
+    def clean_text(self, text):
+        text = self.remove_urls(text)
+        text = text.replace("\n", " ")
+        text = text.replace(".", " ")
+        text = text.replace(",", " ")
+        text = text.replace("!", " ")
+        text = text.replace("?", " ")
+        text = text.replace("-", " ")
+        text = text.strip()
+        return text
+
+    def write_data(self, df, year):
+        json_string = df.to_json(orient="records")
+
+        file_path = f"data/{year}_data.json"
+
+        with open(file_path, "w") as json_file:
+            json_file.write(json_string)
+
+        print("Data saved to:", file_path)

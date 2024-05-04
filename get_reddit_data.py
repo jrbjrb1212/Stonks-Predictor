@@ -1,94 +1,75 @@
 import pandas as pd
-import praw
-from praw.models import MoreComments
-import re
 from datetime import datetime
 from get_ticker import ticker_data
 import sys
+import json
 
-def main():
+def main(file_path):
     fin_data = ticker_data()
-    reddit = praw.Reddit(
-        user_agent="Post Extraction (by /u/jrbjrb1212)",
-        client_id="eoU4CmxaLeFQhMrNGn5tjA",
-        client_secret="xwzcJWlDdSAF-XVPoUj7lrnHqNtTLA",
-    )
 
     # Specify the subreddit you want to gather posts from
-    subreddit_name = "wallstreetbets"
     df = pd.DataFrame(
         columns=["Post_ID", "Text", "Ticker_Symbol", "Hist_Price", "Curr_Price", "Stock_Growth", "Post_Date", "Curr_Date", "Label"]
     )
 
-    subreddit = reddit.subreddit(subreddit_name)
     curr_date = datetime.now().timestamp()
-    submissions = subreddit.new(limit=1_000)
+    seen_map = {}
+    not_stock_set = set()
 
-    for i, submission in enumerate(submissions):
-        text = f"{submission.title} {submission.selftext}"
-        text = clean_text(text)
-        post_date = submission.created_utc
+    with open(file_path, 'r') as file:
+        for i, line in enumerate(file):
+            if i % 1000 == 0:
+                print(f'Parsed {i}th post')
+                print(f'- Found {len(df)} good posts')
+                print(f'- Seen {len(seen_map)} stocks')
+                print(f"- Seen {len(not_stock_set)} bad words that aren't stocks")
 
-        ticker_symbol = fin_data.get_ticker(text)
-        if ticker_symbol is None:
-            continue
+            data = json.loads(line)
+            # Print the JSON data (or process it as needed)
+            if "[removed]" in data["selftext"]:
+                continue
+            
+            if "[deleted]" in data["selftext"]:
+                continue
 
-        curr_price = fin_data.get_current_price(ticker_symbol)
-        if curr_price is None:
-            continue
+            text = f"{data['title']} {data['selftext']}"
+            text = fin_data.clean_text(text)
+            post_date = data['created_utc']
 
-        hist_price = fin_data.get_historic_price(ticker_symbol, post_date)
-        if hist_price is None:
-            continue
+            ticker_symbol, curr_price = fin_data.get_ticker(text, seen_map, not_stock_set)
+            if ticker_symbol is None:
+                continue
+            
+            if ticker_symbol in seen_map:
+                curr_price = seen_map[ticker_symbol]
+            else:
+                seen_map[ticker_symbol] = curr_price
 
-        label, growth = fin_data.label_stock(curr_price, hist_price, post_date)
+            hist_price = fin_data.get_historic_price(ticker_symbol, post_date)
+            if hist_price is None:
+                del seen_map[ticker_symbol]
+                continue
 
-        post_id = submission.id
-        df = df.append(
-            {
-                "Post_ID": post_id,
-                "Text": text,
-                "Ticker_Symbol": ticker_symbol,
-                "Hist_Price": hist_price,
-                "Curr_Price": curr_price,
-                "Stock_Growth": growth,
-                "Post_Date": post_date,
-                "Curr_Date": curr_date,
-                "Label": label,
-            },
-            ignore_index=True,
-        )
+            label, growth = fin_data.label_stock(curr_price, hist_price, post_date)
 
-    write_data(df)
+            post_id = data['id']
+            new_data = {
+                "Post_ID": [post_id],
+                "Text": [text],
+                "Ticker_Symbol": [ticker_symbol],
+                "Hist_Price": [hist_price],
+                "Curr_Price": [curr_price],
+                "Stock_Growth": [growth],
+                "Post_Date": [post_date],
+                "Curr_Date": [curr_date],
+                "Label": [label],
+            }
 
+            new_row_df = pd.DataFrame(new_data)
+            df = pd.concat([df, new_row_df], ignore_index=True)
 
-def remove_urls(text):
-    # Regular expression to match URLs
-    url_pattern = r"http?://\S+|www\.\S+"
-    # Replace URLs with an empty string
-    return re.sub(url_pattern, "", text)
+        fin_data.write_data(df, year)
 
-
-def clean_text(text):
-    text = remove_urls(text)
-    text = text.replace("\n", " ")
-    text = text.replace(".", " ")
-    text = text.replace(",", " ")
-    text = text.replace("!", " ")
-    text = text.replace("?", " ")
-    text = text.replace("-", " ")
-    text = text.strip()
-    return text
-
-def write_data(df):
-    json_string = df.to_json(orient="records")
-
-    file_path = "data/reddit_data.json"
-
-    with open(file_path, "w") as json_file:
-        json_file.write(json_string)
-
-    print("Data saved to:", file_path)
 
 
 def load_json():
@@ -105,11 +86,20 @@ def load_json():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Rerun: python3 get_reddit_data.py {version}")
-        print("- Version 0: Scrape all data")
-        print ("- Version 1: Load data from JSON string save")
-    elif sys.argv[1] == "0":
-        main()
+    if len(sys.argv) == 3:
+        file_path = sys.argv[1]
+        year = sys.argv[2]
+        print(file_path, year)
+        main(file_path)
     else:
         load_json()
+
+    # if len(sys.argv) != 2:
+    #     print("Rerun: python3 get_reddit_data.py {version}")
+    #     print("- Version 0: Scrape all data")
+    #     print ("- Version 1: Load data from JSON string save")
+    # elif sys.argv[1] == "0":
+    #     file_path = sys.argv[2]
+    #     main(file_path)
+    # else:
+    #     load_json()
