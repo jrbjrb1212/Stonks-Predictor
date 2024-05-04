@@ -34,11 +34,12 @@ if __name__ == "__main__":
 
     # Load all JSON files from the specified directory into a single DataFrame
     all_data_df = load_json_files(data_directory)
+    print(all_data_df.head())
 
     if all_data_df is not None:
         # Save the combined DataFrame to a new JSON file
         output_file = "data/reddit_data.json"
-        all_data_df.to_json(output_file, orient="records", lines=True)
+        all_data_df.to_json(output_file, orient="records", lines=False)
 
         print(f"Combined DataFrame saved to {output_file}")
         print(f"Total number of rows in the combined DataFrame: {len(all_data_df)}")
