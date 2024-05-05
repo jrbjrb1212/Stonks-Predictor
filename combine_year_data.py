@@ -39,7 +39,7 @@ if __name__ == "__main__":
     if all_data_df is not None:
         # Save the combined DataFrame to a new JSON file
         output_file = "data/reddit_data.json"
-        all_data_df.to_json(output_file, orient="records", lines=False)
+        all_data_df.to_json(output_file, orient="records")
 
         print(f"Combined DataFrame saved to {output_file}")
         print(f"Total number of rows in the combined DataFrame: {len(all_data_df)}")
